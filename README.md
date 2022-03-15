@@ -11,7 +11,7 @@
 api 接口文件添加注解
 
 ```java
-@Autogen
+@Autogen(HOST)
 public interface ApiService {}
 ```
 **Autogen注解只能够修饰interfac**
