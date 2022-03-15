@@ -14,6 +14,8 @@ api 接口文件添加注解
 @Autogen
 public interface ApiService {}
 ```
-
+**Autogen注解智能修饰interfac**
 
 rebuild后自动扫描被注解修饰类内的所有方法，生成相应代码，使用：继承AbsXXXXXRepositor类
+
+
