@@ -13,11 +13,17 @@ java {
     targetCompatibility JavaVersion.VERSION_11
 }
 afterEvaluate {
+
     publishing {//发布到本地
+        repositories {
+            maven {
+                url = uri("C:\\Users\\RAYDATA/repo")
+            }
+        }
         publications {
             mavenJava(MavenPublication) {
                 groupId = "com.github.jiashuaishuai"
-                version = '1.0.0'
+                version = '1.0.1'
                 artifactId = "autogen-repository-java-compiler"
                 from components.java
             }
