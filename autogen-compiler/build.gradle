@@ -15,11 +15,11 @@ java {
 afterEvaluate {
 
     publishing {//发布到本地
-        repositories {
-            maven {
-                url = uri("C:\\Users\\RAYDATA/repo")
-            }
-        }
+    //    repositories {
+    //        maven {
+    //            url = uri("C:\\Users\\RAYDATA/repo")
+    //        }
+     //   }
         publications {
             mavenJava(MavenPublication) {
                 groupId = "com.github.jiashuaishuai"
