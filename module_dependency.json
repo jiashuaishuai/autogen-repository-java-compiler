@@ -1,0 +1,9 @@
+[
+  {
+    "useModule": false,
+    "modelName": "autogenCompilerModel",
+    "moduleGroup": "com.github.jiashuaishuai:autogen-repository-java-compiler:1.0.0-SNAPSHOT",
+    "moduleDir": "./autogen-compiler"
+  }
+
+]

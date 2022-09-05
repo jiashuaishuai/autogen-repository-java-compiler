@@ -1,0 +1,48 @@
+//依赖切换脚本
+
+import groovy.json.JsonSlurper
+
+try {
+    includeAndSwitchModuleDep()
+} catch (Exception e) {
+    e.printStackTrace()
+}
+
+def includeAndSwitchModuleDep() {
+    def modelDepConfigDir = "./module_dependency.json"
+    def json = file(modelDepConfigDir).getText()
+    def jsonSlurper = new JsonSlurper()
+    def objList = jsonSlurper.parseText(json)
+    println "objList=$objList"
+    // 遍历配置信息列表，找出 useModule==true 的模块，动态include
+    objList.forEach {
+        if (it.useModule) {
+            include ":${it.modelName}"
+            println "moduleDir: " + file(it.moduleDir)
+            project(":${it.modelName}").projectDir = file(it.moduleDir)
+        }
+    }
+    // aar依赖 与 module依赖 动态切换
+    switchToModuleDependency(objList)
+
+}
+
+def switchToModuleDependency(List<Object> moduleDepList) {
+    gradle.projectsEvaluated {
+        it.allprojects { p ->
+            p.configurations.all {
+                resolutionStrategy {
+                    dependencySubstitution {
+                        moduleDepList.forEach { modelItem ->
+                            println "modelItem: " + modelItem
+                            if (modelItem.useModule) {
+                                substitute module(modelItem.moduleGroup) with project(":${modelItem.modelName}")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+}

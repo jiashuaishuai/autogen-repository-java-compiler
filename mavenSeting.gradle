@@ -1,0 +1,53 @@
+
+//gradle 7.+ maven插件打包远程仓库
+
+apply plugin: 'maven-publish'
+
+
+def mavenSecretKeyFile = new File(projectDir.parent + "/mavenSecretKey.properties")
+def mavenSecretKey = new Properties()
+mavenSecretKey.load(new FileInputStream(mavenSecretKeyFile))
+
+/**
+ * 打包带源码
+ */
+task androidSourcesJar(type: Jar) {
+    archiveClassifier.set('sources')
+    from sourceSets.main.java.srcDirs
+}
+
+/**
+ * 打包带doc
+ */
+
+task androidJavadocsJar(type: Jar) {
+    archiveClassifier.set('javadoc')
+    from javadoc
+}
+afterEvaluate {
+    def mArtifactId = ext["ARTIFACT_ID"]
+    def mVersion = ext["VERSION"]
+    publishing {//发布到远程仓库
+        repositories {//上传github发布时不能设置仓库地址
+            maven {
+                allowInsecureProtocol = true
+                url = uri(mavenSecretKey['warehouseAddress'])
+                credentials {
+                    username mavenSecretKey['userName']
+                    password mavenSecretKey['password']
+                }
+            }
+        }
+        publications {
+            mavenJava(MavenPublication) {
+                artifact androidSourcesJar
+//                artifact androidJavadocsJar
+                groupId = "com.github.jiashuaishuai"
+                version = mVersion
+                artifactId = mArtifactId
+                // 可根据自己需求打 debug 包还是 release 包
+                from components.java
+            }
+        }
+    }
+}
