@@ -1,5 +1,5 @@
 # autogen-repository-java-compiler
-### 自动生成RD项目Request 和Repository的apt插件
+### 自动生成BaseLib框架Request 和Repository的apt插件
 ### 使用方法
 引入插件
 
