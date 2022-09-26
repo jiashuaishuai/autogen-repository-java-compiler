@@ -1,16 +1,20 @@
 package com.github.compiler.processor
 
 import com.github.annotation.Autogen
-import com.github.annotation.CloseScheduler
+import com.github.annotation.ThreadScheduler
+import com.github.annotation.ThreadSchedulerType
 import com.github.compiler.utils.*
 import com.squareup.javapoet.*
+import java.lang.Deprecated
 import javax.annotation.processing.*
 import javax.lang.model.SourceVersion
 import javax.lang.model.element.*
 import javax.lang.model.type.DeclaredType
 import javax.lang.model.util.Elements
-import java.lang.Deprecated
 import javax.lang.model.util.Types
+import kotlin.Any
+import kotlin.Boolean
+import kotlin.String
 
 @SupportedOptions("AutogenRepository")
 @SupportedAnnotationTypes("com.github.annotation.Autogen")
@@ -171,37 +175,71 @@ class AutogenRepositoryProcessor : AbstractProcessor() {
         element.enclosedElements.forEach { subElement ->
             if (subElement.kind == ElementKind.METHOD && subElement is ExecutableElement) {
                 //是否关闭线程调度
-                val closeScheduler = subElement.getAnnotation(CloseScheduler::class.java)
-                var isApplySchedulers = false
-                var isHandleResult = false
+                val threadScheduler = subElement.getAnnotation(ThreadScheduler::class.java)
+                //如果ThreadScheduler为空，则 根据返回值类型采用默认处理结果
+                var threadSchedulerType: ThreadSchedulerType =
+                    threadScheduler?.threadScheduler ?: ThreadSchedulerType.DEFAULT
+                var isObservableReturn = false
+                var isBaseResponseReturn = false
                 var returnTypeName: TypeName? = null
-                if (closeScheduler == null) {//如果没有关闭 根据返回值类型判断使用哪个调度器
-                    val returnType = subElement.returnType//获取返回值类型
-                    if (returnType is DeclaredType) {
-                        //检查是否以RxJava中的Observable作为返回值
-                        isApplySchedulers = returnType.asElement().equals(rxObservable)
-                        if (isApplySchedulers) {
-                            returnType.typeArguments.forEach { observableArgument ->
-                                // 检查Observable是否以baseLib中的BaseResponse作为泛型
-                                isHandleResult = mTypeUtils.asElement(observableArgument)
-                                    .equals(baseLibBaseResponse)
-                                if (isHandleResult && observableArgument is DeclaredType) {
-                                    //取出BaseResponse中的泛型作为RxJava.Observable泛型重新包装为Repository的返回参数
-                                    returnTypeName = ParameterizedTypeName.get(
-                                        rxObservable.asClassName(),
-                                        observableArgument.typeArguments[0].asTypeName()
-                                    )
+
+
+                //如果是需要处理请求结果的类型，获取处理结果后的返回值类型 returnTypeName
+                when (threadSchedulerType) {
+                    ThreadSchedulerType.DEFAULT,
+                    ThreadSchedulerType.HANDLE_RESULT_TO_MAIN,
+                    ThreadSchedulerType.HANDLE_RESULT_TO_IO,
+                    ThreadSchedulerType.ONLY_HANDLE_RESULT -> {
+                        val returnType = subElement.returnType//获取返回值类型
+                        if (returnType is DeclaredType) {
+                            //检查是否以RxJava中的Observable作为返回值
+                            isObservableReturn = returnType.asElement().equals(rxObservable)
+                            if (isObservableReturn) {
+                                returnType.typeArguments.forEach { observableArgument ->
+                                    // 检查Observable是否以baseLib中的BaseResponse作为泛型
+                                    isBaseResponseReturn = mTypeUtils.asElement(observableArgument)
+                                        .equals(baseLibBaseResponse)
+                                    if (isBaseResponseReturn && observableArgument is DeclaredType) {
+                                        //取出BaseResponse中的泛型作为RxJava.Observable泛型重新包装为Repository的返回参数
+                                        returnTypeName = ParameterizedTypeName.get(
+                                            rxObservable.asClassName(),
+                                            observableArgument.typeArguments[0].asTypeName()
+                                        )
+                                    } else {
+                                        System.err.println("返回值类型和线程调度器不匹配 mServiceName：$mServiceName  elementName:${subElement.simpleName}   isBaseResponseReturn : $isBaseResponseReturn  threadSchedulerType  $threadSchedulerType ")
+                                        threadSchedulerType = ThreadSchedulerType.DEFAULT
+                                    }
                                 }
+                            } else {
+                                System.err.println("返回值类型和线程调度器不匹配  mServiceName：$mServiceName   elementName:${subElement.simpleName}  isObservableReturn : $isObservableReturn  threadSchedulerType  $threadSchedulerType  ")
+                                threadSchedulerType = ThreadSchedulerType.DEFAULT
                             }
                         }
+                    }
+                    else -> {}
+                }
+                /**
+                 * 返回值类型默认操作:
+                 * 1. io.reactivex.Observable<?> 回调至mainThread
+                 * 2. io.reactivex.Observable<BaseResponse<?>> 解析BaseResponse返回他的泛型类型，并回调至mainThread
+                 * 3. 如果不使用 io.reactivex.Observable<?>，则不处理结果
+                 *
+                 */
+                //如果是 DEFAULT
+                if (threadSchedulerType == ThreadSchedulerType.DEFAULT) {
+                    //并且 是以Observable作为返回值，则默认使用线程调度至Main = SWITCH_MAIN
+                    if (isObservableReturn)
+                        threadSchedulerType = ThreadSchedulerType.SWITCH_MAIN
+                    //并且如果 是BaseResponse返回值，则默认处理返回值结果并且回调只Main =
+                    if (isBaseResponseReturn) {
+                        threadSchedulerType = ThreadSchedulerType.HANDLE_RESULT_TO_MAIN
                     }
                 }
                 val repositoryFunSpecBuilder = createFunctionBuilder(
                     subElement,
                     ClassName.get(requestPackage, requestSimpleName),
                     createDeprecatedApiAnnotation(subElement),
-                    isApplySchedulers,
-                    isHandleResult,
+                    threadSchedulerType,
                     returnTypeName
                 )
                 repositoryFunSpecBuilder.addModifiers(Modifier.PUBLIC)
@@ -219,8 +257,7 @@ class AutogenRepositoryProcessor : AbstractProcessor() {
         subElement: ExecutableElement,
         objectName: Any,
         annotationSpec: AnnotationSpec? = null,
-        isApplySchedulers: Boolean = false,
-        isHandleResult: Boolean = false,
+        threadSchedulerType: ThreadSchedulerType = ThreadSchedulerType.DO_NOT_HANDLE,
         returnType: TypeName? = null
     ): MethodSpec.Builder {
         String
@@ -228,7 +265,8 @@ class AutogenRepositoryProcessor : AbstractProcessor() {
         val functionName = subElement.simpleName.toString()
         val functionParameters = subElement.parameters
         val funSpecBuilder = MethodSpec.methodBuilder(functionName)
-        if (isHandleResult && returnType != null) {
+        //如果处理请求结果返回值，则需要根据处理的结果重新设置返回值
+        if ((threadSchedulerType == ThreadSchedulerType.HANDLE_RESULT_TO_MAIN || threadSchedulerType == ThreadSchedulerType.HANDLE_RESULT_TO_IO || threadSchedulerType == ThreadSchedulerType.ONLY_HANDLE_RESULT) && returnType != null) {
             funSpecBuilder.returns(returnType)
         } else {
             funSpecBuilder.returns(subElement.returnType.asTypeName())
@@ -258,13 +296,16 @@ class AutogenRepositoryProcessor : AbstractProcessor() {
         } else {
             statementSB.append("()")
         }
-        if (isApplySchedulers) {//只有在Repository类里才需要添加
-            if (isHandleResult) {
-                statementSB.append(".compose(handleResult())")
-            } else {
-                statementSB.append(".compose(applySchedulers())")
-            }
+        //只有在Repository类里才需要添加
+        when (threadSchedulerType) {
+            ThreadSchedulerType.HANDLE_RESULT_TO_MAIN -> statementSB.append(".compose(handleResult())")
+            ThreadSchedulerType.SWITCH_MAIN -> statementSB.append(".compose(applySchedulers())")
+            ThreadSchedulerType.HANDLE_RESULT_TO_IO -> statementSB.append(".compose(handleResultToIO())")
+            ThreadSchedulerType.SWITCH_IO -> statementSB.append(".compose(applySchedulersIO())")
+            ThreadSchedulerType.ONLY_HANDLE_RESULT -> statementSB.append(".compose(onlyHandleResult())")
+            else -> {}
         }
+
         funSpecBuilder.addStatement(statementSB.toString(), objectName)
         if (annotationSpec != null) {
             funSpecBuilder.addAnnotation(annotationSpec)

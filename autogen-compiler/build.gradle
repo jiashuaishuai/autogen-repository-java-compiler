@@ -4,7 +4,7 @@ plugins {
     id 'maven-publish'
 }
 dependencies {
-    implementation 'com.github.jiashuaishuai:autogen-repository-annotation:1.0.1'
+    implementation 'com.github.jiashuaishuai:autogen-repository-annotation:1.1.3'
     implementation 'com.squareup:javapoet:1.13.0'
 }
 
